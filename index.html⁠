@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foot-yam - Pro</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #1a1a1a;
+            color: white;
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        #menu, #tournament-menu {
+            text-align: center;
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        .btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            margin: 10px;
+            cursor: pointer;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .btn:hover { background-color: #45a049; }
+        .btn-danger { background-color: #f44336; }
+        .btn-danger:hover { background-color: #da190b; }
+        select {
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        #game-container {
+            display: none;
+            text-align: center;
+        }
+        canvas {
+            border: 4px solid white;
+            background-color: #2e7d32;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.7);
+            max-width: 100%;
+        }
+        .controls {
+            margin-top: 10px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+        .dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 50px);
+            grid-template-rows: repeat(3, 50px);
+            gap: 5px;
+        }
+        .action-btns {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 10px;
+        }
+        .ctrl-btn {
+            width: 50px;
+            height: 50px;
+            font-size: 20px;
+            font-weight: bold;
+            background: white;
+            border: none;
+            border-radius: 5px;
+        }
+        .act-btn {
+            padding: 15px 30px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="menu">
+        <h1>Foot-yam</h1>
+        <p>Choisis la difficulté des bots adverses :</p>
+        <select id="difficulty-select">
+            <option value="1.5">Intermédiaire</option>
+            <option value="2.8">Fort</option>
+            <option value="4.5">Légende</option>
+        </select>
+        <br>
+        <button class="btn" onclick="startMatch(false)">Match Amical</button>
+        <button class="btn" style="background:#ff9800" onclick="openTournament()">Mode Tournoi</button>
+    </div>
+
+    <div id="tournament-menu" style="display:none;">
+        <h2>Coupe Foot-yam</h2>
+        <div id="tournament-tree"></div>
+        <button class="btn" id="start-tournament-match-btn" onclick="startMatch(true)">Jouer le Match</button>
+        <button class="btn btn-danger" onclick="backToMenu()">Quitter</button>
+    </div>
+
+    <div id="game-container">
+        <div style="display:flex; justify-content: space-between; width: 700px; margin-bottom: 5px;">
+            <span id="match-title" style="font-weight:bold;">Amical</span>
+            <span id="score-board" style="font-size:20px; font-weight:bold;">Bleu 0 - 0 Rouge</span>
+            <button class="btn btn-danger" style="padding:5px 10px; margin:0;" onclick="quitMatch()">Quitter</button>
+        </div>
+        <canvas id="field" width="700" height="450"></canvas>
+        
+        <div class="controls">
+            <div class="dpad">
+                <div></div><button class="ctrl-btn" id="btn-up">▲</button><div></div>
+                <button class="ctrl-btn" id="btn-left">◀</button><div></div><button class="ctrl-btn" id="btn-right">▶</button>
+                <div></div><button class="ctrl-btn" id="btn-down">▼</button><div></div>
+            </div>
+            <div class="action-btns">
+                <button class="act-btn" id="btn-pass" style="background:#2196F3">PASSE</button>
+                <button class="act-btn" id="btn-shoot" style="background:#e91e63">TIR</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('field');
+        const ctx = canvas.getContext('2d');
+
+        // Variables d'état
+        let botSpeed = 1.5;
+        let isTournament = false;
+        let tournamentRound = 0; // 0 = Demie, 1 = Finale, 2 = Gagné
+        let myTeamName = "Joueur";
+        let opponentTeamName = "Bots";
+
+        // Équipes et entités
+        let players = [];
+        let ball = { x: 350, y: 225, radius: 8, dx: 0, dy: 0 };
+        let activePlayerIndex = 0;
+
+        const goals = {
+            left: { x: 0, y: 175, w: 15, h: 100 },
+            right: { x: 685, y: 175, w: 15, h: 100 }
+        };
+
+        let score = { player: 0, bot: 0 };
+        let gameInterval;
+        let keys = { up: false, down: false, left: false, right: false };
+
+        // Configuration des touches tactiles/boutons
+        setupMobileControls();
+
+        function setupMobileControls() {
+            const bind = (id, key) => {
+                const el = document.getElementById(id);
+                el.ontouchstart = (e) => { e.preventDefault(); keys[key] = true; };
+                el.ontouchend = () => keys[key] = false;
+                el.onmousedown = () => keys[key] = true;
+                el.onmouseup = () => keys[key] = false;
+            };
+            bind('btn-up', 'up'); bind('btn-down', 'down');
+            bind('btn-left', 'left'); bind('btn-right', 'right');
+
+            // Actions
+            document.getElementById('btn-pass').onclick = makePass;
+            document.getElementById('btn-shoot').onclick = makeShoot;
+        }
+
+        // Clavier PC
+        window.addEventListener('keydown', e => {
+            if(e.key === 'ArrowUp' || e.key === 'z') keys.up = true;
+            if(e.key === 'ArrowDown' || e.key === 's') keys.down = true;
+            if(e.key === 'ArrowLeft' || e.key === 'q') keys.left = true;
+            if(e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+            if(e.key === 'x' || e.key === ' ') makePass();
+            if(e.key === 'c') makeShoot();
+        });
+        window.addEventListener('keyup', e => {
+            if(e.key === 'ArrowUp' || e.key === 'z') keys.up = false;
+            if(e.key === 'ArrowDown' || e.key === 's') keys.down = false;
+            if(e.key === 'ArrowLeft' || e.key === 'q') keys.left = false;
+            if(e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+        });
+
+        function initTeams() {
+            // 3 joueurs Bleus (Coéquipiers)
+            players = [
+                { x: 200, y: 225, team: 'player', isBot: false, id: 0 }, // Attaquant / Porteur initial
+                { x: 150, y: 120, team: 'player', isBot: false, id: 1 }, // Défenseur Haut
+                { x: 150, y: 330, team: 'player', isBot: false, id: 2 }  // Défenseur Bas
+            ];
+            activePlayerIndex = 0;
+
+            // 3 joueurs Rouges (Adversaires)
+            players.push(
+                { x: 500, y: 225, team: 'bot', isBot: true, id: 3 },
+                { x: 550, y: 120, team: 'bot', isBot: true, id: 4 },
+                { x: 550, y: 330, team: 'bot', isBot: true, id: 5 }
+            );
+
+            ball.x = 350; ball.y = 225; ball.dx = 0; ball.dy = 0;
+        }
+
+        function startMatch(tournyMode) {
+            botSpeed = parseFloat(document.getElementById('difficulty-select').value);
+            isTournament = tournyMode;
+
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('tournament-menu').style.display = 'none';
+            document.getElementById('game-container').style.display = 'block';
+
+            if(isTournament) {
+                opponentTeamName = tournamentRound === 0 ? "Real Madrid" : "Barcelone";
+                document.getElementById('match-title').innerText = `Tournoi - ${tournamentRound === 0 ? 'Demi-Finale' : 'Finale'} vs ${opponentTeamName}`;
+            } else {
+                opponentTeamName = "Bots";
+                document.getElementById('match-title').innerText = "Match Amical";
+            }
+
+            score.player = 0; score.bot = 0;
+            initTeams();
+            updateScoreBoard();
+
+            clearInterval(gameInterval);
+            gameInterval = setInterval(gameLoop, 1000 / 60);
+        }
+
+        function openTournament() {
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('tournament-menu').style.display = 'block';
+            renderTournamentTree();
+        }
+
+        function renderTournamentTree() {
+            let html = "";
+            if(tournamentRound === 0) {
+                html = "<p><b>Demi-finale programmée :</b><br>Vous vs Real Madrid<br><br>Autre match : Barcelone vs Bayern</p>";
+                document.getElementById('start-tournament-match-btn').innerText = "Jouer la Demi-Finale";
+            } else if(tournamentRound === 1) {
+                html = "<p><b>FÉLICITATIONS ! Vous êtes en Finale :</b><br>Vous vs Barcelone</p>";
+                document.getElementById('start-tournament-match-btn').innerText = "Jouer la Finale";
+            } else {
+                html = "<h2>🏆 VAINQUEUR DE LA COUPE ! 🏆</h2><p>Vous avez remporté le tournoi légendaire !</p>";
+                document.getElementById('start-tournament-match-btn').style.display = 'none';
+            }
+            document.getElementById('tournament-tree').innerHTML = html;
+        }
+
+        function quitMatch() {
+            clearInterval(gameInterval);
+            if(isTournament) {
+                openTournament();
+            } else {
+                backToMenu();
+            }
+        }
+
+        function backToMenu() {
+            document.getElementById('game-container').style.display = 'none';
+            document.getElementById('tournament-menu').style.display = 'none';
+            document.getElementById('menu').style.display = 'block';
+            document.getElementById('start-tournament-match-btn').style.display = 'inline-block';
+            if(tournamentRound >= 2) tournamentRound = 0; // Reset si fini
+        }
+
+        function updateScoreBoard() {
+            document.getElementById('score-board').innerText = `${myTeamName} ${score.player} - ${score.bot} ${opponentTeamName}`;
+        }
+
+        function makePass() {
+            // Trouver le coéquipier le plus proche (excluant le joueur actif)
+            let current = players[activePlayerIndex];
+            let targetIndex = -1;
+            let minDist = Infinity;
+
+            for(let i=0; i<3; i++) {
+                if(i !== activePlayerIndex) {
+                    let d = Math.hypot(players[i].x - current.x, players[i].y - current.y);
+                    if(d < minDist) { minDist = d; targetIndex = i; }
+                }
+            }
+
+            // Si on a le ballon ou qu'on est tout près, on effectue la passe guidée vers ce joueur
+            let distBall = Math.hypot(ball.x - current.x, ball.y - current.y);
+            if(distBall < 25 && targetIndex !== -1) {
+                let target = players[targetIndex];
+                let angle = Math.atan2(target.y - ball.y, target.x - ball.x);
+                ball.dx = Math.cos(angle) * 7;
+                ball.dy = Math.sin(angle) * 7;
+                
+                // Le contrôle passe instantanément au joueur ciblé pour l'action !
+                activePlayerIndex = targetIndex;
+            }
+        }
+
+        function makeShoot() {
+            let current = players[activePlayerIndex];
+            let distBall = Math.hypot(ball.x - current.x, ball.y - current.y);
+            // On tire fort vers les cages de droite
+            if(distBall < 25) {
+                let angle = Math.atan2(225 - ball.y, 700 - ball.x);
+                ball.dx = Math.cos(angle) * 12;
+                ball.dy = Math.sin(angle) * 12;
+            }
+        }
+
+        function gameLoop() {
+            // 1. Déplacement du joueur actif guidé
+            let user = players[activePlayerIndex];
+            if (keys.up && user.y > 15) user.y -= 4;
+            if (keys.down && user.y < canvas.height - 15) user.y += 4;
+            if (keys.left && user.x > 15) user.x -= 4;
+            if (keys.right && user.x < canvas.width - 15) user.x += 4;
+
+            // Placement automatique simple des 2 autres équipiers bleus s'ils n'ont pas la balle
+            for(let i=0; i<3; i++) {
+                if(i !== activePlayerIndex) {
+                    // Ils se replacent doucement selon la position de la balle
+                    let targetX = (i === 1) ? ball.x - 120 : ball.x - 140;
+                    let targetY = (i === 1) ? ball.y - 60 : ball.y + 60;
+                    players[i].x += (targetX - players[i].x) * 0.02;
+                    players[i].y += (targetY - players[i].y) * 0.02;
+                }
+            }
+
+            // 2. IA des Bots (Rouges)
+            for(let i=3; i<6; i++) {
+                let bot = players[i];
+                // L'IA court vers la balle
+                let angle = Math.atan2(ball.y - bot.y, ball.x - bot.x);
+                bot.x += Math.cos(angle) * botSpeed;
+                bot.y += Math.sin(angle) * botSpeed;
+
+                // Si le bot touche la balle, il tire vers nos cages (à gauche)
+                if(Math.hypot(ball.x - bot.x, ball.y - bot.y) < 20) {
+                    let shootAngle = Math.atan2(225 - ball.y, 0 - ball.x);
+                    ball.dx = Math.cos(shootAngle) * 6;
+                    ball.dy = Math.sin(shootAngle) * 6;
+                }
+            }
+
+            // 3. Physique du Ballon
+            ball.x += ball.dx;
+            ball.y += ball.dy;
+            ball.dx *= 0.97; // Friction
+            ball.dy *= 0.97;
+
+            // Rebond sur les murs horizontaux
+            if (ball.y - ball.radius < 0 || ball.y + ball.radius > canvas.height) ball.dy *= -1;
+            // Rebond murs verticaux (hors cages)
+            if (ball.x - ball.radius < 0 && (ball.y < 175 || ball.y > 275)) ball.dx *= -1;
+            if (ball.x + ball.radius > canvas.width && (ball.y < 175 || ball.y > 275)) ball.dx *= -1;
+
+            // Conduite de balle automatique pour le joueur guidé si collision lente
+            let distToUser = Math.hypot(ball.x - user.x, ball.y - user.y);
+            if(distToUser < 18 && Math.hypot(ball.dx, ball.dy) < 3) {
+                ball.x = user.x + 12;
+                ball.y = user.y;
+            }
+
+            // 4. Détection des Buts
+            if (ball.x < 15 && ball.y >= 175 && ball.y <= 275) {
+                score.bot++;
+                checkGoal();
+            } else if (ball.x > 685 && ball.y >= 175 && ball.y <= 275) {
+                score.player++;
+                checkGoal();
+            }
+
+            // Dessin complet
+            drawField();
+        }
+
+        function checkGoal() {
+            updateScoreBoard();
+            ball.x = 350; ball.y = 225; ball.dx = 0; ball.dy = 0;
+            initTeams();
+
+            // Condition de fin de match à 3 buts
+            if(score.player >= 3) {
+                clearInterval(gameInterval);
+                alert("Match terminé ! Vous avez gagné !");
+                if(isTournament) {
+                    tournamentRound++;
+                }
+                quitMatch();
+            } else if(score.bot >= 3) {
+                clearInterval(gameInterval);
+                alert("Match terminé... Vous avez perdu.");
+                quitMatch();
+            }
+        }
+
+        function drawField() {
+            // Pelouse
+            ctx.fillStyle = "#2e7d32";
+            ctx.fillRect(0,0,canvas.width,canvas.height);
+
+            // Lignes du terrain
+            ctx.strokeStyle = "rgba(255,255,255,0.6)";
+            ctx.lineWidth = 4;
+            ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+            
+            // Ligne du milieu & rond central
+            ctx.beginPath();
+            ctx.moveTo(canvas.width/2, 10); ctx.lineTo(canvas.width/2, canvas.height-10);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(canvas.width/2, canvas.height/2, 50, 0, Math.PI*2);
+            ctx.stroke();
+
+            // Dessin des Cages
+            ctx.fillStyle = "white";
+            ctx.fillRect(goals.left.x, goals.left.y, goals.left.w, goals.left.h);
+            ctx.fillRect(goals.right.x, goals.right.y, goals.right.w, goals.right.h);
+
+            // Dessin des Joueurs
+            players.forEach((p, idx) => {
+                ctx.fillStyle = p.team === 'player' ? '#2196F3' : '#f44336';
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 12, 0, Math.PI*2);
+                ctx.fill();
+                ctx.strokeStyle = "white";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Indicateur sur le joueur que l'on contrôle actuellement
+                if(p.team === 'player' && idx === activePlayerIndex) {
+                    ctx.fillStyle = "yellow";
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y - 25);
+                    ctx.lineTo(p.x - 6, p.y - 35);
+                    ctx.lineTo(p.x + 6, p.y - 35);
+                    ctx.fill();
+                }
+            });
+
+            // Dessin du Ballon
+            ctx.fillStyle = "white";
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI*2);
+            ctx.fill();
+            ctx.strokeStyle = "black";
+            ctx.stroke();
+        }
+    </script>
+</body>
+</html>
